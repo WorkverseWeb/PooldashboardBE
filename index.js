@@ -48,7 +48,7 @@ const userSchema = new mongoose.Schema({
     level7: Number,
     level8: Number,
     level9: Number,
-    wholeGame: Number,
+    allLevels: Number,
     paymentStatus: { type: [String] },
   },
   cartTotalAmount: Number,
@@ -157,30 +157,6 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocs));
  *         yesToSubscribeNewsletter:
  *           type: boolean
  *           default: true
- *
- *     Slot:
- *       type: object
- *       properties:
- *         level1:
- *           type: number
- *         level2:
- *           type: number
- *         level3:
- *           type: number
- *         level4:
- *           type: number
- *         level5:
- *           type: number
- *         level6:
- *           type: number
- *         level7:
- *           type: number
- *         level8:
- *           type: number
- *         level9:
- *           type: number
- *         wholeGame:
- *           type: number
  *   responses:
  *     200:
  *       description: Success
@@ -558,7 +534,7 @@ app.patch("/api/preferences/:email", async (req, res) => {
 /**
  * @swagger
  * tags:
- *   name: cart
+ *   name: Carts
  *   description: Operations related to user carts
  */
 
@@ -602,14 +578,12 @@ app.patch("/api/preferences/:email", async (req, res) => {
  *             level9:
  *               type: number
  *               default: 0
- *             wholeGame:
+ *             allLevels:
  *               type: number
  *               default: 0
- *             paymentStatus:
- *               type: array
- *               items:
- *                 type: string
- *               default: ["Success", "Failed", "Reset"]
+ *         cartTotalAmount:
+ *           type: number
+ *           description: Total amount of the cart
  */
 
 const cartSchema = new mongoose.Schema({
@@ -624,9 +598,9 @@ const cartSchema = new mongoose.Schema({
     level7: { type: Number, default: 0 },
     level8: { type: Number, default: 0 },
     level9: { type: Number, default: 0 },
-    wholeGame: { type: Number, default: 0 },
-    paymentStatus: { type: [String], default: ["Success", "Failed", "Reset"] },
+    allLevels: { type: Number, default: 0 },
   },
+  cartTotalAmount: { type: Number, default: 0 },
 });
 const Cart = mongoose.model("Cart", cartSchema);
 
@@ -636,7 +610,7 @@ const Cart = mongoose.model("Cart", cartSchema);
  *   get:
  *     summary: Get user's cart details by email
  *     description: Retrieve the cart details for a specific user using their email address
- *     tags: [cart]
+ *     tags: [Carts]
  *     parameters:
  *       - in: path
  *         name: email
@@ -670,18 +644,10 @@ app.get("/carts/:email", async (req, res) => {
 
 /**
  * @swagger
- * /carts/{email}:
- *   patch:
- *     summary: Update user's cart details
- *     description: Update the cart details for the specified user by email
- *     tags: [cart]
- *     parameters:
- *       - in: path
- *         name: email
- *         required: true
- *         schema:
- *           type: string
- *           description: The email address of the user
+ * /carts:
+ *   post:
+ *     summary: Add a new cart
+ *     tags: [Carts]
  *     requestBody:
  *       required: true
  *       content:
@@ -689,77 +655,36 @@ app.get("/carts/:email", async (req, res) => {
  *           schema:
  *             $ref: '#/components/schemas/Cart'
  *     responses:
- *       '200':
- *         description: Successfully updated cart details
- *       '400':
- *         description: Invalid request body
- *       '500':
+ *       200:
+ *         description: Cart created successfully
+ *       500:
  *         description: Internal server error
  */
-app.patch("/carts/:email", async (req, res) => {
-  const { email } = req.params;
-  const { cartData } = req.body;
+app.post("/carts", async (req, res) => {
+  const { email, cartAddedProducts, cartTotalAmount } = req.body;
 
   try {
-    // Find the cart for the user
-    let cart = await Cart.findOne({ email });
-    if (!cart) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    cart.cartAddedProducts = cartData;
-
-    await cart.save();
-
-    res.status(200).json({ message: "Cart details updated successfully" });
+    const newCart = new Cart({ email, cartAddedProducts, cartTotalAmount });
+    await newCart.save();
+    res.status(200).send("Cart created successfully");
   } catch (error) {
-    console.error("Error updating cart:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-// Slots schema
-
-const slotSchema = new mongoose.Schema({
-  level1: Number,
-  level2: Number,
-  level3: Number,
-  level4: Number,
-  level5: Number,
-  level6: Number,
-  level7: Number,
-  level8: Number,
-  level9: Number,
-  wholeGame: Number,
-});
-
-const Slot = mongoose.model("Slot", slotSchema);
-
-/**
- * @swagger
- * /slots:
- *   get:
- *     tags: [Slot]
- *     description: Get all slots
- *     responses:
- *       200:
- *         description: Success
- */
-app.get("/slots", async (req, res) => {
-  try {
-    const slots = await Slot.find();
-    res.status(200).json(slots);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(500).send("Internal server error");
   }
 });
 
 /**
  * @swagger
- * /slots:
- *   post:
- *     tags: [Slot]
- *     description: Create a new slot
+ * /carts/{email}:
+ *   patch:
+ *     summary: Update an existing cart
+ *     tags: [Carts]
+ *     parameters:
+ *       - in: path
+ *         name: email
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: The user's email
  *     requestBody:
  *       required: true
  *       content:
@@ -767,42 +692,366 @@ app.get("/slots", async (req, res) => {
  *           schema:
  *             type: object
  *             properties:
- *               level1:
- *                 type: number
- *               level2:
- *                 type: number
- *               level3:
- *                 type: number
- *               level4:
- *                 type: number
- *               level5:
- *                 type: number
- *               level6:
- *                 type: number
- *               level7:
- *                 type: number
- *               level8:
- *                 type: number
- *               level9:
- *                 type: number
- *               wholeGame:
+ *               cartAddedProducts:
+ *                 type: object
+ *                 properties:
+ *                   level1:
+ *                     type: number
+ *                   level2:
+ *                     type: number
+ *                   level3:
+ *                     type: number
+ *                   level4:
+ *                     type: number
+ *                   level5:
+ *                     type: number
+ *                   level6:
+ *                     type: number
+ *                   level7:
+ *                     type: number
+ *                   level8:
+ *                     type: number
+ *                   level9:
+ *                     type: number
+ *                   allLevels:
+ *                     type: number
+ *               cartTotalAmount:
  *                 type: number
  *     responses:
- *       201:
- *         description: Slot created
+ *       200:
+ *         description: Cart updated successfully
+ *       404:
+ *         description: Cart not found
+ *       500:
+ *         description: Internal server error
  */
-app.post("/slots", async (req, res) => {
-  const slot = new Slot(req.body);
+app.patch("/carts/:email", async (req, res) => {
+  const { email } = req.params;
+  const { cartAddedProducts, cartTotalAmount } = req.body;
 
   try {
-    const newSlot = await slot.save();
-    res.status(201).json(newSlot);
-  } catch (err) {
-    res.status(400).json({ message: err.message });
+    const cart = await Cart.findOne({ email });
+    if (!cart) {
+      return res.status(404).send("Cart not found");
+    }
+
+    // Overwrite existing cart data with new data
+    cart.cartAddedProducts = cartAddedProducts;
+    cart.cartTotalAmount = cartTotalAmount;
+
+    await cart.save();
+    res.status(200).send("Cart updated successfully");
+  } catch (error) {
+    console.error("Error updating cart:", error);
+    res.status(500).send("Internal server error");
   }
 });
 
-// assign User
+/**
+ * @swagger
+ * /carts/{email}:
+ *   delete:
+ *     summary: Delete cart data by email
+ *     tags: [Carts]
+ *     description: Deletes the cart data associated with the specified email address.
+ *     parameters:
+ *       - in: path
+ *         name: email
+ *         required: true
+ *         description: The email address of the user whose cart data needs to be deleted.
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: Cart data deleted successfully.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Cart deleted successfully.
+ *       '404':
+ *         description: Cart not found for the specified user.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: Cart not found for the specified user.
+ *       '500':
+ *         description: Internal server error.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: Internal server error.
+ */
+app.delete("/carts/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+    const cart = await Cart.findOne({ email });
+    if (!cart) {
+      return res
+        .status(404)
+        .json({ error: "Cart not found for the specified user" });
+    }
+    await cart.deleteOne();
+    res.status(200).json({ message: "Cart deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting cart:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// SLOTS SCHEMA
+
+/**
+ * @swagger
+ * tags:
+ *   name: Slot
+ *   description: Operations related to user slots
+ */
+
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     Slot:
+ *       type: object
+ *       properties:
+ *         email:
+ *           type: string
+ *           description: The email address of the user
+ *         AllProducts:
+ *           type: object
+ *           properties:
+ *             level1:
+ *               type: number
+ *               default: 0
+ *             level2:
+ *               type: number
+ *               default: 0
+ *             level3:
+ *               type: number
+ *               default: 0
+ *             level4:
+ *               type: number
+ *               default: 0
+ *             level5:
+ *               type: number
+ *               default: 0
+ *             level6:
+ *               type: number
+ *               default: 0
+ *             level7:
+ *               type: number
+ *               default: 0
+ *             level8:
+ *               type: number
+ *               default: 0
+ *             level9:
+ *               type: number
+ *               default: 0
+ *             allLevels:
+ *               type: number
+ *               default: 0
+ *             paymentStatus:
+ *               type: array
+ *               items:
+ *                 type: string
+ *                 enum: [Success, Failed, Pending, Reset]
+ *                 default: Pending
+ *         TotalAmount:
+ *           type: number
+ *           description: Total amount of the slot
+ */
+
+const validStatuses = ["Success", "Failed", "Pending", "Reset"];
+
+const slotSchema = new mongoose.Schema({
+  email: { type: String, required: true },
+  AllProducts: {
+    level1: { type: Number, default: 0 },
+    level2: { type: Number, default: 0 },
+    level3: { type: Number, default: 0 },
+    level4: { type: Number, default: 0 },
+    level5: { type: Number, default: 0 },
+    level6: { type: Number, default: 0 },
+    level7: { type: Number, default: 0 },
+    level8: { type: Number, default: 0 },
+    level9: { type: Number, default: 0 },
+    allLevels: { type: Number, default: 0 },
+    paymentStatus: { type: String, enum: validStatuses, default: "Pending" },
+  },
+  TotalAmount: { type: Number, default: 0 },
+});
+
+const Slot = mongoose.model("Slot", slotSchema);
+
+/**
+ * @swagger
+ * /slots/{email}:
+ *   get:
+ *     summary: Get user's slot details by email
+ *     description: Retrieve the slot details for a specific user using their email address
+ *     tags: [Slot]
+ *     parameters:
+ *       - in: path
+ *         name: email
+ *         description: The email address of the user
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       '200':
+ *         description: Slot details retrieved successfully
+ *       '404':
+ *         description: Slot not found for the specified user
+ *       '500':
+ *         description: Internal server error
+ */
+app.get("/slots/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+    const slot = await Slot.findOne({ email });
+    if (!slot) {
+      return res
+        .status(404)
+        .json({ error: "Slot not found for the specified user" });
+    }
+    res.status(200).json(slot);
+  } catch (error) {
+    console.error("Error retrieving slot:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * @swagger
+ * /slots:
+ *   post:
+ *     summary: Add a new slot
+ *     tags: [Slot]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/Slot'
+ *     responses:
+ *       200:
+ *         description: Slot created successfully
+ *       500:
+ *         description: Internal server error
+ */
+app.post("/slots", async (req, res) => {
+  const { email, AllProducts, TotalAmount } = req.body;
+
+  try {
+    const newSlot = new Slot({ email, AllProducts, TotalAmount });
+    await newSlot.save();
+    res.status(200).send("Slot created successfully");
+  } catch (error) {
+    res.status(500).send("Internal server error");
+  }
+});
+
+/**
+ * @swagger
+ * /slots/{email}:
+ *   patch:
+ *     summary: Update an existing slot
+ *     tags: [Slot]
+ *     parameters:
+ *       - in: path
+ *         name: email
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: The user's email
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               AllProducts:
+ *                 type: object
+ *                 properties:
+ *                   level1:
+ *                     type: number
+ *                   level2:
+ *                     type: number
+ *                   level3:
+ *                     type: number
+ *                   level4:
+ *                     type: number
+ *                   level5:
+ *                     type: number
+ *                   level6:
+ *                     type: number
+ *                   level7:
+ *                     type: number
+ *                   level8:
+ *                     type: number
+ *                   level9:
+ *                     type: number
+ *                   allLevels:
+ *                     type: number
+ *               paymentStatus:
+ *                 type: string
+ *                 enum: [Success, Failed, Pending, Reset]
+ *               TotalAmount:
+ *                 type: number
+ *     responses:
+ *       200:
+ *         description: SLot updated successfully
+ *       404:
+ *         description: Slot not found
+ *       500:
+ *         description: Internal server error
+ */
+app.patch("/slots/:email", async (req, res) => {
+  const { email } = req.params;
+  const { AllProducts, paymentStatus, TotalAmount } = req.body;
+
+  try {
+    const slot = await Slot.findOne({ email });
+    if (!slot) {
+      return res.status(404).send("Slot not found");
+    }
+
+    Object.keys(AllProducts).forEach((key) => {
+      if (AllProducts[key] !== undefined) {
+        slot.AllProducts[key] = AllProducts[key];
+      }
+    });
+
+    const validStatuses = ["Success", "Failed", "Pending", "Reset"];
+    if (paymentStatus && validStatuses.includes(paymentStatus)) {
+      slot.AllProducts.paymentStatus = paymentStatus;
+    }
+
+    if (TotalAmount !== undefined) {
+      slot.TotalAmount = TotalAmount;
+    }
+
+    await slot.save();
+    res.status(200).send("slot updated successfully");
+  } catch (error) {
+    res.status(500).send("Internal server error");
+  }
+});
+
+// ASSIGN USER SCHEMA
 
 const assignUserSchema = new mongoose.Schema({
   auName: { type: String, required: true },
