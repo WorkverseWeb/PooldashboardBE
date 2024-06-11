@@ -3,12 +3,18 @@ const mongoose = require("mongoose");
 const swaggerJsdoc = require("swagger-jsdoc");
 const swaggerUi = require("swagger-ui-express");
 const cors = require("cors");
+const multer = require("multer");
+const xlsx = require("xlsx");
 
 // Initialize Express app
 const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+// Multer setup for file uploads
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage });
 
 // Connect to MongoDB
 mongoose.connect(
@@ -1051,20 +1057,208 @@ app.patch("/slots/:email", async (req, res) => {
   }
 });
 
-// ASSIGN USER SCHEMA
+// group SCHEMA
 
-const assignUserSchema = new mongoose.Schema({
-  auName: { type: String, required: true },
-  auEmail: { type: String, required: true, unique: true },
-  auGroup: { type: String, required: true },
-  auSkills: { type: [String], required: true },
-  auPlaying: { type: Boolean, default: false },
-  auChatting: { type: Boolean, default: false },
-  auFinishedGame: { type: Boolean, default: false },
-  auActiveUser: { type: Boolean, default: true },
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     Group:
+ *       type: object
+ *       required:
+ *         - email
+ *         - groupname
+ *       properties:
+ *         email:
+ *           type: string
+ *           description: The email of the group
+ *         groupname:
+ *           type: array
+ *           items:
+ *             type: string
+ *           description: The names of the group
+ *       example:
+ *         email: "example@example.com"
+ *         groupname: ["group1", "group2"]
+ */
+const groupSchema = new mongoose.Schema({
+  email: { type: String, required: true, unique: true },
+  groupname: { type: [String], required: true },
 });
 
-const AssignUser = mongoose.model("AssignUser", assignUserSchema);
+const Group = mongoose.model("Group", groupSchema);
+
+/**
+ * @swagger
+ *  /group:
+ *   post:
+ *     summary: Create or update a group
+ *     tags: [Group]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 description: The email of the user creating or updating the group
+ *               groupname:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Array of group names
+ *     responses:
+ *       200:
+ *         description: The group was successfully created or updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Group'
+ *       500:
+ *         description: Some server error
+ */
+app.post("/group", async (req, res) => {
+  try {
+    const { email, groupname } = req.body;
+
+    const existingGroup = await Group.findOne({ email, groupname });
+
+    if (existingGroup) {
+      res.status(200).json({ message: "Group already exists." });
+    } else {
+      const newGroup = await Group.create({ email, groupname });
+
+      res.status(201).json(newGroup);
+    }
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+/**
+ * @swagger
+ * /group/{email}:
+ *   get:
+ *     summary: Get a group by email
+ *     tags: [Group]
+ *     parameters:
+ *       - in: path
+ *         name: email
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: The group's email
+ *     responses:
+ *       200:
+ *         description: The group description by email
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Group'
+ *       404:
+ *         description: The group was not found
+ *       500:
+ *         description: Some server error
+ */
+app.get("/group/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+
+    const group = await Group.findOne({ email });
+
+    if (!group) {
+      return res.status(404).json({ message: "Group not found" });
+    }
+
+    res.json(group);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+/**
+ * @swagger
+ * /group/{email}:
+ *   patch:
+ *     summary: Update a group by email
+ *     tags: [Group]
+ *     parameters:
+ *       - in: path
+ *         name: email
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: The group's email
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               groupname:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *               removeLast:
+ *                 type: boolean
+ *             example:
+ *               groupname: ["newGroup"]
+ *               removeLast: false
+ *     responses:
+ *       200:
+ *         description: The group was successfully updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Group'
+ *       404:
+ *         description: The group was not found
+ *       500:
+ *         description: Some server error
+ */
+app.patch("/group/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+    const { groupname } = req.body;
+
+    let updatedGroup;
+
+    if (groupname.length === 0) {
+      // If groupname array is empty, remove the entire field
+      updatedGroup = await Group.findOneAndUpdate(
+        { email },
+        { $unset: { groupname: "" } },
+        { new: true }
+      );
+    } else {
+      // Update groupname array with the new value
+      updatedGroup = await Group.findOneAndUpdate(
+        { email },
+        { groupname },
+        { new: true }
+      );
+    }
+
+    if (!updatedGroup) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json(updatedGroup);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ASSIGN USER SCHEMA
+
+/**
+ * @swagger
+ * tags:
+ *   name: AssignUsers
+ */
 
 /**
  * @swagger
@@ -1119,72 +1313,129 @@ const AssignUser = mongoose.model("AssignUser", assignUserSchema);
  *         auActiveUser: true
  */
 
-/**
- * @swagger
- * tags:
- *   name: AssignUsers
- */
+const assignUserSchema = new mongoose.Schema(
+  {
+    auName: { type: String, required: true },
+    auEmail: { type: String, required: true, unique: true },
+    auGroup: { type: String, required: true },
+    auSkills: { type: [String], required: true },
+    auPlaying: { type: Boolean, default: false },
+    auChatting: { type: Boolean, default: false },
+    auFinishedGame: { type: Boolean, default: false },
+    auActiveUser: { type: Boolean, default: true },
+    addedBy: {
+      type: String,
+      required: true,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+const AssignUser = mongoose.model("AssignUser", assignUserSchema);
 
 /**
  * @swagger
  * /assignUsers:
  *   get:
- *     summary: Returns the list of all assignUsers
- *     tags: [AssignUsers]
- *     responses:
- *       200:
- *         description: The list of assignUsers
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 $ref: '#/components/schemas/AssignUser'
- */
-app.get("/assignUsers", async (req, res) => {
-  try {
-    const assignUsers = await AssignUser.find();
-    res.status(200).json(assignUsers);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-/**
- * @swagger
- * /assignUsers/{auEmail}:
- *   get:
- *     summary: Get the assignUser by email
+ *     summary: Get users assigned by a specific user.
  *     tags: [AssignUsers]
  *     parameters:
- *       - in: path
- *         name: auEmail
+ *       - in: query
+ *         name: authenticatedUserEmail
  *         schema:
  *           type: string
  *         required: true
- *         description: The assignUser email
+ *         description: The email of the authenticated user.
  *     responses:
- *       200:
- *         description: The assignUser description by email
+ *       '200':
+ *         description: Successfully retrieved assigned users.
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/AssignUser'
- *       404:
- *         description: The assignUser was not found
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 users:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       auName:
+ *                         type: string
+ *                         description: The name of the assigned user.
+ *                       auEmail:
+ *                         type: string
+ *                         description: The email of the assigned user.
+ *                       auSkills:
+ *                         type: array
+ *                         items:
+ *                           type: string
+ *                         description: List of skills of the assigned user.
+ *                       auGroup:
+ *                         type: string
+ *                         description: The group to which the user belongs.
+ *                       addedBy:
+ *                         type: string
+ *                         description: The email of the user who added this user.
+ *       '400':
+ *         description: Bad request - Authenticated user email is required.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   description: Error message.
+ *       '404':
+ *         description: Not found - No users found assigned by this user.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   description: Error message.
+ *       '500':
+ *         description: Internal server error.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   description: Error message.
  */
-app.get("/assignUsers/:auEmail", async (req, res) => {
+app.get("/assignUsers", async (req, res) => {
   try {
-    const assignUser = await AssignUser.findOne({
-      auEmail: req.params.auEmail,
-    });
-    if (assignUser) {
-      res.status(200).json(assignUser);
-    } else {
-      res.status(404).json({ message: "AssignUser not found" });
+    const { authenticatedUserEmail } = req.query;
+
+    if (!authenticatedUserEmail) {
+      return res
+        .status(400)
+        .json({ message: "Authenticated user email is required" });
     }
+
+    const users = await AssignUser.find({
+      addedBy: authenticatedUserEmail.toLowerCase(),
+    });
+
+    if (!users || users.length === 0) {
+      return res
+        .status(404)
+        .json({ message: "No users found assigned by this user" });
+    }
+
+    res.status(200).json({ success: true, users });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error("Error fetching assigned users:", error);
+    res.status(500).json({ message: "Internal server error" });
   }
 });
 
@@ -1192,31 +1443,213 @@ app.get("/assignUsers/:auEmail", async (req, res) => {
  * @swagger
  * /assignUsers:
  *   post:
- *     summary: Create a new assignUser
+ *     summary: Assign users to a group or upload users from a file.
  *     tags: [AssignUsers]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             $ref: '#/components/schemas/AssignUser'
+ *     consumes:
+ *       - multipart/form-data
+ *     parameters:
+ *       - in: formData
+ *         name: file
+ *         type: file
+ *         description: The file containing user data (optional).
+ *       - in: formData
+ *         name: authenticatedUserEmail
+ *         type: string
+ *         required: true
+ *         description: The email of the authenticated user.
+ *       - in: formData
+ *         name: auName
+ *         type: string
+ *         description: The name of the user (if not uploading from a file).
+ *       - in: formData
+ *         name: auEmail
+ *         type: string
+ *         description: The email of the user (if not uploading from a file).
+ *       - in: formData
+ *         name: auSkills
+ *         type: string
+ *         description: Comma-separated list of user skills (if not uploading from a file).
+ *       - in: formData
+ *         name: auGroup
+ *         type: string
+ *         description: The group to which the user belongs (if not uploading from a file).
+ *       - in: formData
+ *         name: isClicked
+ *         type: string
+ *         description: JSON string indicating which skills are clicked (required if uploading from a file).
  *     responses:
- *       201:
- *         description: The assignUser was successfully created
+ *       '201':
+ *         description: Successfully created.
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/AssignUser'
- *       400:
- *         description: Bad request
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 newAssignUser:
+ *                   type: object
+ *                   properties:
+ *                     auName:
+ *                       type: string
+ *                       description: The name of the assigned user.
+ *                     auEmail:
+ *                       type: string
+ *                       description: The email of the assigned user.
+ *                     auSkills:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                       description: List of skills of the assigned user.
+ *                     auGroup:
+ *                       type: string
+ *                       description: The group to which the user belongs.
+ *                     addedBy:
+ *                       type: string
+ *                       description: The email of the user who added this user.
+ *       '409':
+ *         description: Conflict - User with the same email already exists or duplicate emails found in the uploaded file.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   description: Error message.
+ *       '400':
+ *         description: Bad request - Invalid request format.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   description: Error message.
+ *       '500':
+ *         description: Internal server error.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   description: Error message.
  */
-app.post("/assignUsers", async (req, res) => {
-  const assignUser = new AssignUser(req.body);
+app.post("/assignUsers", upload.single("file"), async (req, res) => {
   try {
-    const newAssignUser = await assignUser.save();
-    res.status(201).json(newAssignUser);
+    const authenticatedUserEmail =
+      req.body.authenticatedUserEmail.toLowerCase();
+    console.log("Authenticated user:", authenticatedUserEmail);
+
+    if (
+      req.body.auName &&
+      req.body.auEmail &&
+      req.body.auSkills &&
+      req.body.auGroup
+    ) {
+      const { auSkills, auEmail, ...userData } = req.body;
+      const existingUser = await AssignUser.findOne({
+        auEmail: auEmail.toLowerCase(),
+      });
+
+      if (existingUser) {
+        return res
+          .status(409)
+          .json({ message: "User already exists with this email." });
+      }
+
+      const skillsArray = auSkills.split(",").map((skill) => skill.trim());
+
+      const assignUser = new AssignUser({
+        ...userData,
+        auSkills: skillsArray,
+        auEmail: auEmail.toLowerCase(),
+        addedBy: authenticatedUserEmail,
+      });
+
+      const newAssignUser = await assignUser.save();
+      return res.status(201).json({ success: true, newAssignUser });
+    }
+
+    if (req.file && req.body.isClicked) {
+      const fileBuffer = req.file.buffer;
+      const skills = JSON.parse(req.body.isClicked);
+      const workbook = xlsx.read(fileBuffer, { type: "buffer" });
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const data = xlsx.utils.sheet_to_json(worksheet);
+
+      const existingEmails = new Set();
+      const duplicates = [];
+
+      for (const student of data) {
+        const newStudentData = {};
+        for (const key in student) {
+          if (Object.hasOwnProperty.call(student, key)) {
+            let formattedKey = key.toLowerCase();
+            if (formattedKey === "name") formattedKey = "auName";
+            else if (formattedKey === "email") formattedKey = "auEmail";
+            else if (formattedKey === "group") formattedKey = "auGroup";
+            newStudentData[formattedKey] = student[key];
+          }
+        }
+
+        const email = newStudentData.auEmail.toLowerCase();
+
+        if (existingEmails.has(email)) {
+          duplicates.push(email);
+        } else {
+          existingEmails.add(email);
+        }
+      }
+
+      if (duplicates.length > 0) {
+        return res.status(409).json({ success: false, duplicates });
+      } else {
+        for (const student of data) {
+          const newStudentData = {};
+          for (const key in student) {
+            if (Object.hasOwnProperty.call(student, key)) {
+              let formattedKey = key.toLowerCase();
+              if (formattedKey === "name") formattedKey = "auName";
+              else if (formattedKey === "email") formattedKey = "auEmail";
+              else if (formattedKey === "group") formattedKey = "auGroup";
+              newStudentData[formattedKey] = student[key];
+            }
+          }
+
+          const email = newStudentData.auEmail.toLowerCase();
+          try {
+            const existingUser = await AssignUser.findOne({ auEmail: email });
+            if (!existingUser) {
+              const assignUser = new AssignUser({
+                ...newStudentData,
+                auEmail: email,
+                auSkills: Object.keys(skills).filter((skill) => skills[skill]),
+                addedBy: authenticatedUserEmail,
+              });
+              await assignUser.save();
+            }
+          } catch (error) {
+            console.error("Error saving user:", error);
+          }
+        }
+        return res
+          .status(201)
+          .json({ success: true, message: "Users uploaded successfully." });
+      }
+    }
+
+    return res.status(400).json({ message: "Invalid request format." });
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    console.error("Error processing request:", error);
+    return res.status(500).json({ message: "Internal server error" });
   }
 });
 
