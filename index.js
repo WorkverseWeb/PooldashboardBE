@@ -5,6 +5,7 @@ const swaggerUi = require("swagger-ui-express");
 const cors = require("cors");
 const multer = require("multer");
 const xlsx = require("xlsx");
+const axios = require("axios");
 
 // Initialize Express app
 const app = express();
@@ -1057,6 +1058,76 @@ app.patch("/slots/:email", async (req, res) => {
   }
 });
 
+// initial slots
+const initialSlotSchema = new mongoose.Schema({
+  email: { type: String, required: true },
+  AllProducts: {
+    level1: { type: Number, default: 0 },
+    level2: { type: Number, default: 0 },
+    level3: { type: Number, default: 0 },
+    level4: { type: Number, default: 0 },
+    level5: { type: Number, default: 0 },
+    level6: { type: Number, default: 0 },
+    level7: { type: Number, default: 0 },
+    level8: { type: Number, default: 0 },
+    level9: { type: Number, default: 0 },
+    allLevels: { type: Number, default: 0 },
+  },
+});
+
+const InitialSlot = mongoose.model("InitialSlot", initialSlotSchema);
+
+app.get("/initialslot/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+    const initslot = await InitialSlot.findOne({ email });
+    if (!initslot) {
+      return res
+        .status(404)
+        .json({ error: "Slot not found for the specified user" });
+    }
+    res.status(200).json(initslot);
+  } catch (error) {
+    console.error("Error retrieving slot:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/initialslot", async (req, res) => {
+  const { email, AllProducts } = req.body;
+
+  try {
+    const newInitSlot = new InitialSlot({ email, AllProducts });
+    await newInitSlot.save();
+    res.status(200).send("Slot created successfully");
+  } catch (error) {
+    res.status(500).send("Internal server error");
+  }
+});
+
+app.patch("/initialslot/:email", async (req, res) => {
+  const { email } = req.params;
+  const { AllProducts } = req.body;
+
+  try {
+    const initslot = await InitialSlot.findOne({ email });
+    if (!initslot) {
+      return res.status(404).send("Slot not found");
+    }
+
+    Object.keys(AllProducts).forEach((key) => {
+      if (AllProducts[key] !== undefined) {
+        initslot.AllProducts[key] = AllProducts[key];
+      }
+    });
+
+    await initslot.save();
+    res.status(200).send("slot updated successfully");
+  } catch (error) {
+    res.status(500).send("Internal server error");
+  }
+});
+
 // group SCHEMA
 
 /**
@@ -1575,6 +1646,21 @@ app.post("/assignUsers", upload.single("file"), async (req, res) => {
       });
 
       const newAssignUser = await assignUser.save();
+
+      const isClicked = req.body.isClicked
+        ? JSON.parse(req.body.isClicked)
+        : {};
+      for (const [skill, clicked] of Object.entries(isClicked)) {
+        if (clicked) {
+          const updatedSlot = await updateSlot(authenticatedUserEmail, skill);
+          if (!updatedSlot.success) {
+            return res
+              .status(500)
+              .json({ message: "Failed to update slot quantities." });
+          }
+        }
+      }
+
       return res.status(201).json({ success: true, newAssignUser });
     }
 
@@ -1640,6 +1726,18 @@ app.post("/assignUsers", upload.single("file"), async (req, res) => {
             console.error("Error saving user:", error);
           }
         }
+
+        for (const skill in skills) {
+          if (skills[skill]) {
+            const updatedSlot = await updateSlot(authenticatedUserEmail, skill);
+            if (!updatedSlot.success) {
+              return res
+                .status(500)
+                .json({ message: "Failed to update slot quantities." });
+            }
+          }
+        }
+
         return res
           .status(201)
           .json({ success: true, message: "Users uploaded successfully." });
@@ -1652,6 +1750,57 @@ app.post("/assignUsers", upload.single("file"), async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 });
+
+async function updateSlot(email, skill) {
+  try {
+    const skillLevelMap = {
+      "Creative Problem solving": "level1",
+      "Entrepreneurial Mindset": "level2",
+      Negotiation: "level3",
+      "Story-telling": "level4",
+      "First Principles Thinking": "level5",
+      "Sharp Remote Communication": "level6",
+      Collaboration: "level7",
+      "Emotional Intelligence": "level8",
+      "Productivity Management": "level9",
+      "Entire Game": "allLevels",
+    };
+
+    const response = await axios.get(
+      `http://localhost:8000/initialslot/${email}`
+    );
+    const slotDetails = response.data.AllProducts;
+
+    if (skill === "allLevels") {
+      for (const skillName in skillLevelMap) {
+        const level = skillLevelMap[skillName];
+        if (slotDetails[level] > 0) {
+          slotDetails[level]--;
+        }
+      }
+    } else {
+      const level = skillLevelMap[skill];
+
+      if (level && slotDetails[level] > 0) {
+        slotDetails[level]--;
+      }
+    }
+
+    const slotResponse = await axios.patch(
+      `http://localhost:8000/initialslot/${email}`,
+      { AllProducts: slotDetails }
+    );
+
+    if (slotResponse.status !== 200) {
+      return { success: false };
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating slot quantities:", error);
+    return { success: false };
+  }
+}
 
 // Start the server
 const PORT = process.env.PORT || 8000;
