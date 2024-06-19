@@ -1153,105 +1153,80 @@ app.get("/assignUsers", async (req, res) => {
  * @swagger
  * /assignUsers:
  *   post:
- *     summary: Assign users to a group or upload users from a file.
+ *     summary: Assign users or upload users from file
  *     tags: [AssignUsers]
+ *     description: >
+ *       This endpoint allows assigning users or uploading user data from a file,
+ *       either individually or in bulk. It also updates user slots based on skills selected.
  *     consumes:
  *       - multipart/form-data
  *     parameters:
  *       - in: formData
- *         name: file
- *         type: file
- *         description: The file containing user data (optional).
- *       - in: formData
  *         name: authenticatedUserEmail
- *         type: string
  *         required: true
- *         description: The email of the authenticated user.
+ *         type: string
+ *         description: Email of the authenticated user making the request.
  *       - in: formData
  *         name: auName
  *         type: string
- *         description: The name of the user (if not uploading from a file).
+ *         description: Name of the user (required for individual assignment).
  *       - in: formData
  *         name: auEmail
  *         type: string
- *         description: The email of the user (if not uploading from a file).
+ *         description: Email of the user (required for individual assignment).
  *       - in: formData
  *         name: auSkills
  *         type: string
- *         description: Comma-separated list of user skills (if not uploading from a file).
+ *         description: Comma-separated list of skills (required for individual assignment).
  *       - in: formData
  *         name: auGroup
  *         type: string
- *         description: The group to which the user belongs (if not uploading from a file).
+ *         description: Group of the user (required for individual assignment).
  *       - in: formData
  *         name: isClicked
  *         type: string
- *         description: JSON string indicating which skills are clicked (required if uploading from a file).
+ *         description: JSON object indicating clicked skills (required if file is uploaded).
+ *       - in: formData
+ *         name: file
+ *         type: file
+ *         description: Excel file containing user data (required if individual data is not provided).
  *     responses:
- *       '201':
- *         description: Successfully created.
- *         content:
- *           application/json:
- *             schema:
+ *       201:
+ *         description: User(s) assigned successfully.
+ *         schema:
+ *           type: object
+ *           properties:
+ *             success:
+ *               type: boolean
+ *               example: true
+ *             newAssignUser:
  *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 newAssignUser:
- *                   type: object
- *                   properties:
- *                     auName:
- *                       type: string
- *                       description: The name of the assigned user.
- *                     auEmail:
- *                       type: string
- *                       description: The email of the assigned user.
- *                     auSkills:
- *                       type: array
- *                       items:
- *                         type: string
- *                       description: List of skills of the assigned user.
- *                     auGroup:
- *                       type: string
- *                       description: The group to which the user belongs.
- *                     addedBy:
- *                       type: string
- *                       description: The email of the user who added this user.
- *       '409':
- *         description: Conflict - User with the same email already exists or duplicate emails found in the uploaded file.
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   description: Error message.
- *       '400':
- *         description: Bad request - Invalid request format.
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 message:
- *                   type: string
- *                   description: Error message.
- *       '500':
+ *               description: Details of newly assigned user (for individual assignment).
+ *       400:
+ *         description: Invalid request format.
+ *       409:
+ *         description: Conflict - User(s) already exist with provided email(s) (for bulk upload).
+ *         schema:
+ *           type: object
+ *           properties:
+ *             success:
+ *               type: boolean
+ *               example: false
+ *             duplicates:
+ *               type: array
+ *               items:
+ *                 type: string
+ *                 example: user@example.com
+ *       500:
  *         description: Internal server error.
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 message:
- *                   type: string
- *                   description: Error message.
+ *         schema:
+ *           type: object
+ *           properties:
+ *             message:
+ *               type: string
+ *               example: Failed to update slot quantities.
  */
+
 app.post("/assignUsers", upload.single("file"), async (req, res) => {
   try {
     const authenticatedUserEmail =
@@ -1442,6 +1417,138 @@ async function updateSlot(email, skill) {
     return { success: false };
   }
 }
+
+// doubt form
+
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     Issue:
+ *       type: object
+ *       required:
+ *         - email
+ *         - issue
+ *         - doubt
+ *       properties:
+ *         email:
+ *           type: string
+ *           format: email
+ *           description: User's email address (unique)
+ *         issue:
+ *           type: string
+ *           description: Description of the issue
+ *         doubt:
+ *           type: string
+ *           description: Detailed description of the issue
+ */
+const issueSchema = new mongoose.Schema({
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+  },
+  issue: {
+    type: String,
+    required: true,
+  },
+  doubt: {
+    type: String,
+    required: true,
+  },
+});
+
+const Issue = mongoose.model("Issue", issueSchema);
+
+/**
+ * @swagger
+ * /api/issues/{email}:
+ *   post:
+ *     summary: Submit an issue or doubt
+ *     tags:
+ *       - Issue
+ *     parameters:
+ *       - in: path
+ *         name: email
+ *         schema:
+ *           type: string
+ *           format: email
+ *         required: true
+ *         description: User's email address
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - issue
+ *               - doubt
+ *             properties:
+ *               issue:
+ *                 type: string
+ *                 description: Description of the issue
+ *               doubt:
+ *                 type: string
+ *                 description: Detailed description of the issue
+ *     responses:
+ *       200:
+ *         description: Issue submitted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Issue submitted successfully
+ *                 data:
+ *                   $ref: '#/components/schemas/Issue'
+ *       400:
+ *         description: Bad request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: Please provide all required fields
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: Error submitting the issue
+ */
+
+app.post("/api/issues/:email", async (req, res) => {
+  const { email } = req.params;
+  const { issue, doubt } = req.body;
+
+  try {
+    // Create a new issue entry
+    const newIssue = new Issue({
+      email,
+      issue,
+      doubt,
+    });
+
+    const savedIssue = await newIssue.save();
+
+    res.status(200).json({
+      message: "Issue submitted successfully",
+      data: savedIssue,
+    });
+  } catch (error) {
+    console.error("Error submitting the issue:", error);
+    res.status(500).json({ error: "Error submitting the issue" });
+  }
+});
 
 // Start the server
 const PORT = process.env.PORT || 8000;
