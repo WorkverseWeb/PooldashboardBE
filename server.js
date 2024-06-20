@@ -6,6 +6,7 @@ const cors = require("cors");
 const multer = require("multer");
 const xlsx = require("xlsx");
 const axios = require("axios");
+require("dotenv").config();
 
 // Initialize Express app
 const app = express();
@@ -18,13 +19,10 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
 // Connect to MongoDB
-mongoose.connect(
-  "mongodb+srv://priyanka:Priyanka%40workverse@cluster0.4h3mjjj.mongodb.net/Pooldashboard",
-  {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  }
-);
+mongoose.connect(process.env.MONGO_URL, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+});
 
 // Define User Schema
 const userSchema = new mongoose.Schema({
