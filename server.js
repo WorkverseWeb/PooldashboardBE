@@ -6,11 +6,16 @@ const cors = require("cors");
 const multer = require("multer");
 const xlsx = require("xlsx");
 const axios = require("axios");
+const AWS = require("aws-sdk");
+// const { S3Client } = require("@aws-sdk/client-s3");
+// const multerS3 = require("multer-s3");
+const s3 = new AWS.S3();
 require("dotenv").config();
 
 // Initialize Express app
 const app = express();
 
+// middleware
 app.use(cors());
 app.use(express.json());
 
@@ -18,10 +23,66 @@ app.use(express.json());
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
+// const s3Client = new S3Client({
+//   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+//   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+//   region: process.env.AWS_REGION,
+// });
+
+// const uploadimg = multer({
+//   storage: multerS3({
+//     s3: s3Client,
+//     bucket: process.env.S3_BUCKET_NAME,
+//     acl: "public-read",
+//     key: function (req, file, cb) {
+//       cb(null, `${Date.now().toString()}-${file.originalname}`);
+//     },
+//   }),
+// });
+
 // Connect to MongoDB
-mongoose.connect(process.env.MONGO_URL, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
+mongoose
+  .connect(process.env.MONGO_URL, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
+  .then(() => {
+    console.log("Connected to MongoDB");
+  })
+  .catch((error) => {
+    console.error("Error connecting to MongoDB:", error);
+  });
+
+app.post("/generate-presigned-url", (req, res) => {
+  const fileName = req.body.fileName;
+  const fileType = req.body.fileType;
+
+  if (!fileName || !fileType) {
+    return res.status(400).send({ message: "Missing fileName or fileType" });
+  }
+
+  // Create a unique file name
+  const s3FileName = `${Date.now().toString()}-${fileName}`;
+
+  // Set up S3 upload parameters
+  const params = {
+    Bucket: process.env.S3_BUCKET_NAME,
+    Key: s3FileName,
+    Expires: 60,
+    ContentType: fileType,
+  };
+
+  // Generate the pre-signed URL
+  s3.getSignedUrl("putObject", params, (err, url) => {
+    if (err) {
+      console.error(err);
+      return res
+        .status(500)
+        .send({ message: "Error generating pre-signed URL", error: err });
+    }
+
+    res.send({ preSignedUrl: url, s3FileName: s3FileName });
+  });
 });
 
 // Define User Schema
@@ -79,11 +140,11 @@ const swaggerOptions = {
     },
     servers: [
       {
-        url: "http://localhost:8000",
+        url: process.env.BASE_URL,
       },
     ],
   },
-  apis: ["./index.js"],
+  apis: ["./server.js"],
 };
 
 const swaggerDocs = swaggerJsdoc(swaggerOptions);
@@ -1224,7 +1285,6 @@ app.get("/assignUsers", async (req, res) => {
  *               type: string
  *               example: Failed to update slot quantities.
  */
-
 app.post("/assignUsers", upload.single("file"), async (req, res) => {
   try {
     const authenticatedUserEmail =
@@ -1381,7 +1441,7 @@ async function updateSlot(email, skill) {
     };
 
     const response = await axios.get(
-      `http://localhost:8000/initialslot/${email}`
+      `${process.env.BASE_URL}/initialslot/${email}`
     );
     const slotDetails = response.data.AllProducts;
 
@@ -1401,8 +1461,10 @@ async function updateSlot(email, skill) {
     }
 
     const slotResponse = await axios.patch(
-      `http://localhost:8000/initialslot/${email}`,
-      { AllProducts: slotDetails }
+      `${process.env.BASE_URL}/initialslot/${email}`,
+      {
+        AllProducts: slotDetails,
+      }
     );
 
     if (slotResponse.status !== 200) {
@@ -1545,6 +1607,70 @@ app.post("/api/issues/:email", async (req, res) => {
   } catch (error) {
     console.error("Error submitting the issue:", error);
     res.status(500).json({ error: "Error submitting the issue" });
+  }
+});
+
+// Define Feedback schema and model
+const feedbackSchema = new mongoose.Schema({
+  userEmail: String,
+  selectedEmoji: Number,
+});
+
+const Feedback = mongoose.model("Feedback", feedbackSchema);
+
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     Feedback:
+ *       type: object
+ *       required:
+ *         - userEmail
+ *         - selectedEmoji
+ *       properties:
+ *         userEmail:
+ *           type: string
+ *           description: The user's email
+ *         selectedEmoji:
+ *           type: integer
+ *           description: The index of the selected emoji
+ *       example:
+ *         userEmail: user@example.com
+ *         selectedEmoji: 2
+ */
+
+/**
+ * @swagger
+ * /api/feedback:
+ *   post:
+ *     summary: Submit user feedback
+ *     tags: [Feedback]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/Feedback'
+ *     responses:
+ *       200:
+ *         description: Feedback submitted successfully
+ *       500:
+ *         description: Internal server error
+ */
+app.post("/api/feedback", async (req, res) => {
+  const { userEmail, selectedEmoji } = req.body;
+
+  if (!userEmail || selectedEmoji === undefined) {
+    return res.status(400).send("userEmail and selectedEmoji are required");
+  }
+
+  try {
+    const feedback = new Feedback({ userEmail, selectedEmoji });
+    await feedback.save();
+    res.status(200).send("Feedback submitted successfully");
+  } catch (error) {
+    console.error("Error submitting feedback:", error);
+    res.status(500).send("Internal server error");
   }
 });
 
