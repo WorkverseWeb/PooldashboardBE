@@ -354,7 +354,7 @@ const userPreferencesSchema = new mongoose.Schema({
   yesToProductUpdate: { type: Boolean, default: false },
   yesToSubscribeNewsletter: { type: Boolean, default: false },
 });
-
+// just for test
 const UserPreferences = mongoose.model(
   "UserPreferences",
   userPreferencesSchema
