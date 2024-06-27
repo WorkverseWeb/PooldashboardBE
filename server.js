@@ -6,10 +6,9 @@ const cors = require("cors");
 const multer = require("multer");
 const xlsx = require("xlsx");
 const axios = require("axios");
-const AWS = require("aws-sdk");
-// const { S3Client } = require("@aws-sdk/client-s3");
-// const multerS3 = require("multer-s3");
-const s3 = new AWS.S3();
+const { S3Client, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+const multerS3 = require("multer-s3");
+const Razorpay = require("razorpay");
 require("dotenv").config();
 
 // Initialize Express app
@@ -22,23 +21,6 @@ app.use(express.json());
 // Multer setup for file uploads
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
-
-// const s3Client = new S3Client({
-//   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-//   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-//   region: process.env.AWS_REGION,
-// });
-
-// const uploadimg = multer({
-//   storage: multerS3({
-//     s3: s3Client,
-//     bucket: process.env.S3_BUCKET_NAME,
-//     acl: "public-read",
-//     key: function (req, file, cb) {
-//       cb(null, `${Date.now().toString()}-${file.originalname}`);
-//     },
-//   }),
-// });
 
 // Connect to MongoDB
 mongoose
@@ -53,36 +35,254 @@ mongoose
     console.error("Error connecting to MongoDB:", error);
   });
 
-app.post("/generate-presigned-url", (req, res) => {
-  const fileName = req.body.fileName;
-  const fileType = req.body.fileType;
+app.get("/", (req, res) => {
+  res.send("Hello from Express!");
+});
 
-  if (!fileName || !fileType) {
-    return res.status(400).send({ message: "Missing fileName or fileType" });
+// razor pay
+const razorpay = new Razorpay({
+  key_id: "rzp_test_uGoq5ADrFTgYRAhk",
+  key_secret: "FySe2f58UYtg6Hjkj1a5s6clk9B",
+});
+
+// s3 bucket credentials
+const s3 = new S3Client({
+  region: process.env.AWS_REGION,
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+});
+
+// razor pay
+app.post("/order", async (req, res) => {
+  const razorpay = new Razorpay({
+    key_id: req.body.keyId,
+    key_secret: req.body.keySecret,
+  });
+
+  const options = {
+    amount: req.body.amount,
+    currency: req.body.currency,
+    receipt: "any unique id for every order",
+    payment_capture: 1,
+  };
+  try {
+    const response = await razorpay.orders.create(options);
+    res.json({
+      order_id: response.id,
+      currency: response.currency,
+      amount: response.amount,
+    });
+  } catch (err) {
+    res.status(400).send("Not able to create order. Please try again!");
+  }
+});
+
+// Swagger setup
+const swaggerOptions = {
+  swaggerDefinition: {
+    openapi: "3.0.0",
+    info: {
+      title: "API Documentation",
+      version: "1.0.0",
+      description: "API Documentation with Swagger",
+    },
+    servers: [
+      {
+        url: process.env.BASE_URL,
+      },
+    ],
+  },
+  apis: ["./server.js"],
+};
+
+const swaggerDocs = swaggerJsdoc(swaggerOptions);
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocs));
+
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     ProfileImage:
+ *       type: object
+ *       required:
+ *         - email
+ *       properties:
+ *         imageUrl:
+ *           type: string
+ *           description: URL of the profile image stored in AWS S3.
+ *           example: https://your-bucket-name.s3.amazonaws.com/profileImages/1627888289147-image.png
+ *         email:
+ *           type: string
+ *           description: Email associated with the profile image.
+ *           example: user@example.com
+ */
+const imageSchema = new mongoose.Schema({
+  imageUrl: { type: String },
+  email: { type: String, required: true, unique: true },
+});
+
+const ProfileImage = mongoose.model("ProfileImage", imageSchema);
+
+/**
+ * @swagger
+ * /upload:
+ *   post:
+ *     summary: Upload a profile image
+ *     description: Upload a profile image to S3 and save the image URL to the database.
+ *     tags:
+ *       - Profile Image
+ *     consumes:
+ *       - multipart/form-data
+ *     parameters:
+ *       - in: formData
+ *         name: file
+ *         type: file
+ *         description: The image file to upload.
+ *         required: true
+ *       - in: formData
+ *         name: email
+ *         type: string
+ *         description: The email associated with the profile image.
+ *         required: true
+ *     responses:
+ *       200:
+ *         description: Image uploaded successfully
+ *         schema:
+ *           type: object
+ *           properties:
+ *             imageUrl:
+ *               type: string
+ *               description: URL of the uploaded image
+ *               example: https://your-bucket-name.s3.amazonaws.com/profileImages/1627888289147-image.png
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ProfileImage'
+ *       400:
+ *         description: Missing email or file
+ *         schema:
+ *           type: object
+ *           properties:
+ *             message:
+ *               type: string
+ *               example: Missing email or file
+ *       500:
+ *         description: Failed to upload image
+ *         schema:
+ *           type: object
+ *           properties:
+ *             error:
+ *               type: string
+ *               example: Failed to upload image
+ * /upload/{email}:
+ *   get:
+ *     summary: Get profile image by email
+ *     description: Fetch the profile image URL by email.
+ *     tags:
+ *       - Profile Image
+ *     parameters:
+ *       - in: path
+ *         name: email
+ *         type: string
+ *         required: true
+ *         description: The email associated with the profile image.
+ *     responses:
+ *       200:
+ *         description: Image fetched successfully
+ *         schema:
+ *           type: object
+ *           properties:
+ *             _id:
+ *               type: string
+ *               example: 60d21b4967d0d8992e610c85
+ *             imageUrl:
+ *               type: string
+ *               example: https://your-bucket-name.s3.amazonaws.com/profileImages/1627888289147-image.png
+ *             email:
+ *               type: string
+ *               example: user@example.com
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ProfileImage'
+ *       404:
+ *         description: Image not found
+ *         schema:
+ *           type: object
+ *           properties:
+ *             error:
+ *               type: string
+ *               example: Image not found
+ *       500:
+ *         description: Internal server error
+ *         schema:
+ *           type: object
+ *           properties:
+ *             error:
+ *               type: string
+ *               example: Internal server error
+ */
+const uploadimg = multer({
+  storage: multerS3({
+    s3: s3,
+    bucket: process.env.S3_BUCKET_NAME,
+    metadata: function (req, file, cb) {
+      cb(null, { fieldName: file.fieldname });
+    },
+    key: function (req, file, cb) {
+      cb(null, `profileImages/${Date.now().toString()}-${file.originalname}`);
+    },
+  }),
+});
+
+app.post("/upload", uploadimg.single("file"), async (req, res) => {
+  const { email } = req.body;
+  const file = req.file;
+
+  if (!email || !file) {
+    return res.status(400).json({ message: "Missing email or file" });
   }
 
-  // Create a unique file name
-  const s3FileName = `${Date.now().toString()}-${fileName}`;
+  try {
+    const s3FileName = file.key;
+    const imageUrl = `https://${process.env.S3_BUCKET_NAME}.s3.amazonaws.com/${s3FileName}`;
 
-  // Set up S3 upload parameters
-  const params = {
-    Bucket: process.env.S3_BUCKET_NAME,
-    Key: s3FileName,
-    Expires: 60,
-    ContentType: fileType,
-  };
-
-  // Generate the pre-signed URL
-  s3.getSignedUrl("putObject", params, (err, url) => {
-    if (err) {
-      console.error(err);
-      return res
-        .status(500)
-        .send({ message: "Error generating pre-signed URL", error: err });
+    let existingProfile = await ProfileImage.findOne({ email });
+    if (existingProfile) {
+      const oldImageKey = existingProfile.imageUrl.split(
+        `${process.env.S3_BUCKET_NAME}/`
+      )[1];
+      if (oldImageKey) {
+        const deleteParams = {
+          Bucket: process.env.S3_BUCKET_NAME,
+          Key: oldImageKey,
+        };
+        const deleteCommand = new DeleteObjectCommand(deleteParams);
+        await s3.send(deleteCommand);
+      }
+      existingProfile.imageUrl = imageUrl;
+      await existingProfile.save();
+    } else {
+      await ProfileImage.create({ email, imageUrl });
     }
 
-    res.send({ preSignedUrl: url, s3FileName: s3FileName });
-  });
+    res.status(200).json({ imageUrl });
+  } catch (error) {
+    console.error("Error uploading image:", error);
+    res.status(500).json({ error: "Failed to upload image" });
+  }
+});
+
+app.get("/upload/:email", async (req, res) => {
+  try {
+    const image = await ProfileImage.findOne({ email: req.params.email });
+    if (!image) {
+      return res.status(404).json({ error: "Image not found" });
+    }
+    res.status(200).json(image);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Define User Schema
@@ -128,27 +328,6 @@ const userSchema = new mongoose.Schema({
 
 // Create User model
 const User = mongoose.model("User", userSchema);
-
-// Swagger setup
-const swaggerOptions = {
-  swaggerDefinition: {
-    openapi: "3.0.0",
-    info: {
-      title: "API Documentation",
-      version: "1.0.0",
-      description: "API Documentation with Swagger",
-    },
-    servers: [
-      {
-        url: process.env.BASE_URL,
-      },
-    ],
-  },
-  apis: ["./server.js"],
-};
-
-const swaggerDocs = swaggerJsdoc(swaggerOptions);
-app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocs));
 
 /**
  * @swagger
