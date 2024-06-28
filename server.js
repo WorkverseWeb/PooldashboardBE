@@ -9,6 +9,7 @@ const axios = require("axios");
 const { S3Client, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 const multerS3 = require("multer-s3");
 const Razorpay = require("razorpay");
+const CryptoJS = require("crypto-js");
 require("dotenv").config();
 
 // Initialize Express app
@@ -28,8 +29,19 @@ mongoose
     useNewUrlParser: true,
     useUnifiedTopology: true,
   })
-  .then(() => {
+  .then(async () => {
     console.log("Connected to MongoDB");
+
+    try {
+      await Issue.collection.dropIndex("email_1");
+      console.log("Unique index on email dropped successfully");
+    } catch (err) {
+      if (err.codeName === "IndexNotFound") {
+        console.log("Index not found, nothing to drop");
+      } else {
+        console.error("Error dropping index:", err);
+      }
+    }
   })
   .catch((error) => {
     console.error("Error connecting to MongoDB:", error);
@@ -37,12 +49,6 @@ mongoose
 
 app.get("/", (req, res) => {
   res.send("Hello from Express!");
-});
-
-// razor pay
-const razorpay = new Razorpay({
-  key_id: "rzp_test_uGoq5ADrFTgYRAhk",
-  key_secret: "FySe2f58UYtg6Hjkj1a5s6clk9B",
 });
 
 // s3 bucket credentials
@@ -53,27 +59,93 @@ const s3 = new S3Client({
 });
 
 // razor pay
-app.post("/order", async (req, res) => {
-  const razorpay = new Razorpay({
-    key_id: req.body.keyId,
-    key_secret: req.body.keySecret,
-  });
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID,
+  key_secret: process.env.RAZORPAY_KEY_SECRET,
+});
 
+const orderSchema = new mongoose.Schema({
+  order_id: {
+    type: String,
+    required: true,
+  },
+  currency: {
+    type: String,
+    required: true,
+  },
+  amount: {
+    type: Number,
+    required: true,
+  },
+  created_at: {
+    type: Date,
+    default: Date.now,
+  },
+});
+
+const Order = mongoose.model("Order", orderSchema);
+
+// razor pay
+app.post("/order", async (req, res) => {
+  const { amount, currency } = req.body;
   const options = {
-    amount: req.body.amount,
-    currency: req.body.currency,
-    receipt: "any unique id for every order",
+    amount: amount,
+    currency: currency,
+    receipt: `order_${Math.floor(Math.random() * 1000000)}`,
     payment_capture: 1,
   };
   try {
     const response = await razorpay.orders.create(options);
+
+    const order = new Order({
+      order_id: response.id,
+      currency: response.currency,
+      amount: amount / 100,
+    });
+    await order.save();
+
     res.json({
       order_id: response.id,
       currency: response.currency,
-      amount: response.amount,
+      amount: amount / 100,
     });
   } catch (err) {
     res.status(400).send("Not able to create order. Please try again!");
+  }
+});
+
+// app.post("/paymentCapture", (req, res) => {
+//   const secret_key = process.env.RAZORPAY_WEBHOOK_SECRET;
+
+//   const data = req.body;
+//   const hmac = CryptoJS.createHmac("sha256", secret_key);
+//   const generatedSignature = hmac.update(JSON.stringify(data)).digest("hex");
+
+//   if (generatedSignature === req.headers["x-razorpay-signature"]) {
+//     console.log("Request is legit");
+
+//     // Handle payment success
+//     res.json({ status: "ok" });
+//   } else {
+//     res.status(400).send("Invalid signature");
+//   }
+// });
+
+app.post("/refund", async (req, res) => {
+  try {
+    const { paymentId, amount } = req.body;
+    const options = {
+      payment_id: paymentId,
+      amount: amount,
+    };
+
+    const response = await razorpay.payments.refund(options.payment_id, {
+      amount: options.amount,
+    });
+    res.send("Successfully refunded");
+  } catch (error) {
+    console.log(error);
+    res.status(400).send("Unable to issue a refund");
   }
 });
 
@@ -1673,7 +1745,6 @@ async function updateSlot(email, skill) {
  *         email:
  *           type: string
  *           format: email
- *           description: User's email address (unique)
  *         issue:
  *           type: string
  *           description: Description of the issue
@@ -1685,7 +1756,6 @@ const issueSchema = new mongoose.Schema({
   email: {
     type: String,
     required: true,
-    unique: true,
   },
   issue: {
     type: String,
