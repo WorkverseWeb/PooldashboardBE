@@ -6,8 +6,6 @@ const cors = require("cors");
 const multer = require("multer");
 const xlsx = require("xlsx");
 const axios = require("axios");
-const { S3Client, DeleteObjectCommand } = require("@aws-sdk/client-s3");
-const multerS3 = require("multer-s3");
 const Razorpay = require("razorpay");
 const CryptoJS = require("crypto-js");
 require("dotenv").config();
@@ -49,13 +47,6 @@ mongoose
 
 app.get("/", (req, res) => {
   res.send("Hello from Express!");
-});
-
-// s3 bucket credentials
-const s3 = new S3Client({
-  region: process.env.AWS_REGION,
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
 });
 
 // razor pay
@@ -188,12 +179,6 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocs));
  *           description: Email associated with the profile image.
  *           example: user@example.com
  */
-const imageSchema = new mongoose.Schema({
-  imageUrl: { type: String },
-  email: { type: String, required: true, unique: true },
-});
-
-const ProfileImage = mongoose.model("ProfileImage", imageSchema);
 
 /**
  * @swagger
@@ -294,68 +279,67 @@ const ProfileImage = mongoose.model("ProfileImage", imageSchema);
  *               type: string
  *               example: Internal server error
  */
-const uploadimg = multer({
-  storage: multerS3({
-    s3: s3,
-    bucket: process.env.S3_BUCKET_NAME,
-    metadata: function (req, file, cb) {
-      cb(null, { fieldName: file.fieldname });
-    },
-    key: function (req, file, cb) {
-      cb(null, `profileImages/${Date.now().toString()}-${file.originalname}`);
-    },
-  }),
+const imageSchema = new mongoose.Schema({
+  imageData: { type: String },
+  contentType: { type: String }, // Content type of the image
+  email: { type: String, required: true, unique: true },
 });
 
-app.post("/upload", uploadimg.single("file"), async (req, res) => {
-  const { email } = req.body;
-  const file = req.file;
+const ProfileImage = mongoose.model("ProfileImage", imageSchema);
 
-  if (!email || !file) {
-    return res.status(400).json({ message: "Missing email or file" });
-  }
+// Multer setup
+const storageImg = multer.memoryStorage();
+const uploadImage = multer({ storage: storageImg });
 
+// Upload route
+app.post("/upload", uploadImage.single("image"), async (req, res) => {
   try {
-    const s3FileName = file.key;
-    const imageUrl = `https://${process.env.S3_BUCKET_NAME}.s3.amazonaws.com/${s3FileName}`;
+    const imageData = req.file.buffer.toString("base64");
+    const contentType = req.file.mimetype;
+    const email = req.body.email;
 
-    let existingProfile = await ProfileImage.findOne({ email });
-    if (existingProfile) {
-      const oldImageKey = existingProfile.imageUrl.split(
-        `${process.env.S3_BUCKET_NAME}/`
-      )[1];
-      if (oldImageKey) {
-        const deleteParams = {
-          Bucket: process.env.S3_BUCKET_NAME,
-          Key: oldImageKey,
-        };
-        const deleteCommand = new DeleteObjectCommand(deleteParams);
-        await s3.send(deleteCommand);
-      }
-      existingProfile.imageUrl = imageUrl;
-      await existingProfile.save();
+    let profileImage = await ProfileImage.findOne({ email: email });
+
+    if (profileImage) {
+      profileImage.imageData = imageData;
+      profileImage.contentType = contentType;
     } else {
-      await ProfileImage.create({ email, imageUrl });
+      profileImage = new ProfileImage({
+        imageData: imageData,
+        contentType: contentType,
+        email: email,
+      });
     }
 
-    res.status(200).json({ imageUrl });
+    await profileImage.save();
+    res.status(200).send("File uploaded and stored in database");
   } catch (error) {
-    console.error("Error uploading image:", error);
-    res.status(500).json({ error: "Failed to upload image" });
+    console.error("Error uploading file:", error);
+    res.status(500).send("Error uploading file");
   }
 });
 
+// Fetch route
 app.get("/upload/:email", async (req, res) => {
   try {
-    const image = await ProfileImage.findOne({ email: req.params.email });
-    if (!image) {
-      return res.status(404).json({ error: "Image not found" });
+    const email = req.params.email;
+    const profileImage = await ProfileImage.findOne({ email: email });
+
+    if (!profileImage) {
+      return res.status(404).send("Image not found");
     }
-    res.status(200).json(image);
+
+    const imageData = Buffer.from(profileImage.imageData, "base64"); // Convert Base64 string to buffer
+    res.set("Content-Type", profileImage.contentType);
+    res.send(imageData);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("Error fetching image:", error);
+    res.status(500).send("Error fetching image");
   }
 });
+
+// Serve static files
+app.use("/uploads", express.static("uploads"));
 
 // Define User Schema
 const userSchema = new mongoose.Schema({
