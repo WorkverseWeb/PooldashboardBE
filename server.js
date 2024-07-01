@@ -105,6 +105,28 @@ app.post("/order", async (req, res) => {
   }
 });
 
+app.patch("/order/:orderId", async (req, res) => {
+  const { paymentStatus } = req.body;
+  const orderId = req.params.orderId;
+
+  try {
+    const order = await Order.findOneAndUpdate(
+      { order_id: orderId },
+      { $set: { paymentStatus: paymentStatus } },
+      { new: true }
+    );
+
+    if (!order) {
+      return res.status(404).send("Order not found");
+    }
+
+    res.json(order);
+  } catch (error) {
+    console.error("Error updating order payment status:", error);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
 // app.post("/paymentCapture", (req, res) => {
 //   const secret_key = process.env.RAZORPAY_WEBHOOK_SECRET;
 
@@ -122,23 +144,23 @@ app.post("/order", async (req, res) => {
 //   }
 // });
 
-app.post("/refund", async (req, res) => {
-  try {
-    const { paymentId, amount } = req.body;
-    const options = {
-      payment_id: paymentId,
-      amount: amount,
-    };
+// app.post("/refund", async (req, res) => {
+//   try {
+//     const { paymentId, amount } = req.body;
+//     const options = {
+//       payment_id: paymentId,
+//       amount: amount,
+//     };
 
-    const response = await razorpay.payments.refund(options.payment_id, {
-      amount: options.amount,
-    });
-    res.send("Successfully refunded");
-  } catch (error) {
-    console.log(error);
-    res.status(400).send("Unable to issue a refund");
-  }
-});
+//     const response = await razorpay.payments.refund(options.payment_id, {
+//       amount: options.amount,
+//     });
+//     res.send("Successfully refunded");
+//   } catch (error) {
+//     console.log(error);
+//     res.status(400).send("Unable to issue a refund");
+//   }
+// });
 
 // Swagger setup
 const swaggerOptions = {
@@ -1890,16 +1912,69 @@ const Feedback = mongoose.model("Feedback", feedbackSchema);
  *       500:
  *         description: Internal server error
  */
-app.post("/api/feedback", async (req, res) => {
-  const { userEmail, selectedEmoji } = req.body;
+// app.post("/api/feedback", async (req, res) => {
+//   const { userEmail, selectedEmoji } = req.body;
 
-  if (!userEmail || selectedEmoji === undefined) {
-    return res.status(400).send("userEmail and selectedEmoji are required");
+//   if (!userEmail || selectedEmoji === undefined) {
+//     return res.status(400).send("userEmail and selectedEmoji are required");
+//   }
+
+//   try {
+//     const feedback = new Feedback({ userEmail, selectedEmoji });
+//     await feedback.save();
+//     res.status(200).send("Feedback submitted successfully");
+//   } catch (error) {
+//     console.error("Error submitting feedback:", error);
+//     res.status(500).send("Internal server error");
+//   }
+// });
+app.post("/api/feedback", async (req, res) => {
+  const {
+    userEmail,
+    selectedEmoji,
+    formType,
+    selectedEmojiFeedback2,
+    selectedEmojiFeedback3,
+  } = req.body;
+
+  if (!userEmail) {
+    return res.status(400).send("userEmail is required");
+  }
+
+  if (
+    (formType === undefined || formType === "form1") &&
+    selectedEmoji === undefined
+  ) {
+    return res.status(400).send("selectedEmoji is required for form1");
+  }
+
+  if (formType === "form2" && selectedEmojiFeedback2 === undefined) {
+    return res.status(400).send("selectedEmojiFeedback2 is required for form2");
+  }
+
+  if (formType === "form3" && selectedEmojiFeedback3 === undefined) {
+    return res.status(400).send("selectedEmojiFeedback3 is required for form3");
   }
 
   try {
-    const feedback = new Feedback({ userEmail, selectedEmoji });
-    await feedback.save();
+    if (formType === "form1" || formType === undefined) {
+      const feedback = new Feedback({ userEmail, selectedEmoji });
+      await feedback.save();
+    } else if (formType === "form2") {
+      const feedback2 = new Feedback({
+        userEmail,
+        selectedEmoji: selectedEmojiFeedback2,
+        formType,
+      });
+      await feedback2.save();
+    } else if (formType === "form3") {
+      const feedback3 = new Feedback({
+        userEmail,
+        selectedEmoji: selectedEmojiFeedback3,
+        formType,
+      });
+      await feedback3.save();
+    }
     res.status(200).send("Feedback submitted successfully");
   } catch (error) {
     console.error("Error submitting feedback:", error);
