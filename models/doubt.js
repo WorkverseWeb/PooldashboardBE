@@ -1,26 +1,5 @@
 const mongoose = require("mongoose");
 
-/**
- * @swagger
- * components:
- *   schemas:
- *     Issue:
- *       type: object
- *       required:
- *         - email
- *         - issue
- *         - doubt
- *       properties:
- *         email:
- *           type: string
- *           format: email
- *         issue:
- *           type: string
- *           description: Description of the issue
- *         doubt:
- *           type: string
- *           description: Detailed description of the issue
- */
 const issueSchema = new mongoose.Schema({
   email: {
     type: String,
